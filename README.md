@@ -47,6 +47,23 @@ The response shape is byte-compatible with what the shipped client expects
 | `POST /api/analytics/track` | 204 |
 | `* /api/*` (catch-all) | `{}` 200 so the UI degrades gracefully |
 
+### Auth (session)
+
+| Endpoint | Behaviour |
+|---|---|
+| `POST /api/auth/register` | `{email, password}` → 200 `{user}` · 400 invalid · 409 duplicate |
+| `POST /api/auth/login` | → 200 `{token, user}` + `session` cookie (httpOnly) · 401 bad credentials |
+| `POST /api/auth/logout` | destroys the session (header or cookie), clears cookie |
+| `GET /api/auth/me` | `{user}` or `{user:null}` |
+
+Dependency-free (`node:crypto` scrypt, opaque tokens) — see `lib/auth.ts`.
+
+### Verification
+
+`node ../scripts/verify-api.mjs` runs 31 assertions against a running server
+(core contract + full auth flow). The GitHub Actions CI builds the project on
+every push.
+
 ## Next steps
 
 1. **Auth** — replace the dummy `auth-google-mobile` with a real provider
