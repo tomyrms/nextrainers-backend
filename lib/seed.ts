@@ -75,6 +75,16 @@ export type Analysis = {
   opponentTeamFormation: string;
   // Filled lazily by GET /api/analysis/:id when missing (contract §7).
   createdAt?: string;
+  // Filled by POST /api/analysis/:id/generate-tips.
+  tips?: AnalysisTip[];
+  tipsGeneratedAt?: string;
+};
+
+export type AnalysisTip = {
+  id: string;
+  category: "defense" | "attack" | "transition" | "setPieces";
+  title: string;
+  body: string;
 };
 
 export type SeasonPlan = {
@@ -124,6 +134,13 @@ export type NextMatch = {
   opponent: string | null;
   homeAway: "home" | "away";
   competition: string | null;
+};
+
+// One imported fixture (POST /api/season/calendar, contract §6).
+export type SeasonMatch = NextMatch & {
+  id: string;
+  seasonPlanId: string;
+  source: string;
 };
 
 // ---------------------------------------------------------------- dates

@@ -1,22 +1,21 @@
-import { connection } from "next/server";
 import { json } from "@/lib/http";
-import { persistSoon, store, withStore } from "@/lib/store";
+import { store, withStore } from "@/lib/store";
 
-// GET /api/analysis/:id -> the stored analysis with a createdAt (contract §7:
-// shape not captured client-side, so the stored object passes through as is);
-// 404 { error: "not_found" } for unknown ids.
+// GET /api/analysis/:id -> the stored analysis with createdAt and tips
+// (contract §7: shape not captured client-side, so the stored object passes
+// through; `tips` is [] until generate-tips ran); 404 { error: "not_found" }.
 async function handleGET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  await connection();
   const { id } = await ctx.params;
 
-  const analysis = store.analyses.find((entry) => entry.id === id);
-  if (!analysis) return json({ error: "not_found" }, { status: 404 });
+  const index = store.analyses.findIndex((entry) => entry.id === id);
+  if (index < 0) return json({ error: "not_found" }, { status: 404 });
 
+  let analysis = store.analyses[index];
   if (!analysis.createdAt) {
-    analysis.createdAt = new Date().toISOString();
-    persistSoon();
+    analysis = { ...analysis, createdAt: new Date().toISOString() };
+    store.analyses[index] = analysis;
   }
-  return json(analysis);
+  return json({ ...analysis, tips: analysis.tips ?? [] });
 }
 
 export const GET = withStore(handleGET);

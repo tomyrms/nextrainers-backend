@@ -44,10 +44,18 @@ The response shape is byte-compatible with what the shipped client expects
 | `GET /api/public/coach-count` | 21 000 |
 | `GET/POST /api/trainings`, `GET/DELETE /api/trainings/:id` | in-memory list |
 | `GET /api/exercises`, `GET/POST/DELETE /api/exercises/favorite` | in-memory |
-| `GET/POST /api/season-plan`, `GET /api/season/sessions`, `/calendar`, `/next-match` | empty states |
-| `POST /api/season/generate`, `GET /api/generation/status`, `POST /api/generation/live-activity-token` | simulated generation job (~1.2s): appends 2 sessions + trainings, status polls read `done` + `path` (see `lib/generation.ts`) |
+| `GET/PUT /api/season-plan`, `GET /api/season/sessions` | seeded plan + sessions |
+| `GET/POST /api/season/calendar` | match calendar per plan (`{matches}` / `{inserted}`, `replace`, duplicates skipped) |
+| `POST /api/season/quick-import` | `{teamCategory, matches}` → `{plan}` (finds/creates the plan, replaces its calendar) · 400 `NO_DATED_MATCHES` |
+| `GET /api/season/next-match` | first imported fixture on/after `from`, else the seeded demo match |
+| `POST /api/season/generate`, `GET /api/generation/status`, `POST /api/generation/live-activity-token` | simulated generation job (~1.2s): 2 sessions + trainings that *replace* the previous run (stable dates), status `done` + `path`, expires 10 min after finishing (see `lib/generation.ts`) |
 | `GET /api/club/info` | no club yet |
-| `GET /api/analysis`, `GET/POST /api/players`, `GET /api/lineup`, `GET /api/assistant/context` | empty states |
+| `GET/POST /api/analysis`, `GET /api/analysis/:id`, `POST /api/analysis/:id/generate-tips` | detail with `tips` (deterministic, formation-based — `lib/tips.ts`) |
+| `GET/POST /api/players`, `GET/PUT/PATCH/DELETE /api/players/:id` | seeded roster |
+| `POST /api/players/import/parse` (multipart CSV), `POST /api/players/import` | `{rows, existingCount}` preview → `{inserted, skipped, limitReached}` (`lib/players.ts`) |
+| `GET/POST/DELETE /api/club/library` | club library of exercise ids (no club access for the demo coach) |
+| `GET/POST /api/coach-dna/match` | stores and returns the client's match object |
+| `GET /api/lineup`, `GET /api/assistant/context` | empty states |
 | `POST /api/auth-google-mobile` | accepts idToken, returns dummy ticket |
 | `POST /api/analytics/track` | 204 |
 | `* /api/*` (catch-all) | `{}` 200 so the UI degrades gracefully |
@@ -65,8 +73,8 @@ Dependency-free (`node:crypto` scrypt, opaque tokens) — see `lib/auth.ts`.
 
 ### Verification
 
-`node ../scripts/verify-api.mjs` runs 31 assertions against a running server
-(core contract + full auth flow). The GitHub Actions CI builds the project and
+`node ../scripts/verify-api.mjs` runs ~120 assertions against a running server
+(core contract, auth flow, generation determinism, calendar, imports, tips). The GitHub Actions CI builds the project and
 runs the same suite (`scripts/verify-api.mjs`) against the production server on
 every push.
 

@@ -23,6 +23,7 @@ import {
   seedSeasonPlan,
   seedSeasonSessions,
   seedTrainings,
+  type SeasonMatch,
 } from "./seed";
 
 export { persistSoon, withStore } from "./persist";
@@ -71,6 +72,12 @@ const state = {
   liveActivityTokens: [] as string[],
   // Last season-generation job (lib/generation.ts), shared across instances.
   generationJob: null as GenerationJobRecord | null,
+  // Imported match calendar (POST /api/season/calendar, quick-import).
+  seasonMatches: [] as SeasonMatch[],
+  // Exercise ids saved to the club library (appendix endpoint).
+  clubLibrary: [] as string[],
+  // Last coach-DNA match saved by the client (appendix endpoint).
+  coachDnaMatch: null as Record<string, unknown> | null,
 };
 
 export type StoreState = typeof state;
@@ -91,6 +98,8 @@ const SNAPSHOT_ARRAY_KEYS = [
   "seasonSessions",
   "notifications",
   "liveActivityTokens",
+  "seasonMatches",
+  "clubLibrary",
 ] as const;
 
 const SNAPSHOT_OBJECT_KEYS = [
@@ -119,6 +128,10 @@ function applySnapshot(snap: Record<string, unknown>): void {
   const job = snap.generationJob as GenerationJobRecord | null | undefined;
   if (job === null || (typeof job === "object" && typeof job?.status === "string")) {
     state.generationJob = job ?? null;
+  }
+  const dna = snap.coachDnaMatch;
+  if (dna === null || (dna && typeof dna === "object" && !Array.isArray(dna))) {
+    state.coachDnaMatch = dna as Record<string, unknown> | null;
   }
   if (Array.isArray(snap.favorites)) {
     state.favorites = new Set(snap.favorites.filter((id): id is string => typeof id === "string"));
@@ -161,6 +174,9 @@ function snapshot(): Record<string, unknown> {
     exerciseFeedback: state.exerciseFeedback,
     liveActivityTokens: state.liveActivityTokens,
     generationJob: state.generationJob,
+    seasonMatches: state.seasonMatches,
+    clubLibrary: state.clubLibrary,
+    coachDnaMatch: state.coachDnaMatch,
   };
 }
 

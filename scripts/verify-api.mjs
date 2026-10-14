@@ -344,5 +344,110 @@ console.log('\n== Collateral ==');
   }
 }
 
+console.log('\n== Season calendar / import ==');
+{
+  const plan = planId ?? 'plan_1';
+  const d = (n) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+  const matches = [
+    { date: d(3), opponent: 'Verify FC', homeAway: 'away', competition: 'Coupe', source: 'manual' },
+    { date: d(10), opponent: 'Verify United', homeAway: 'home', competition: 'Championnat', source: 'manual' },
+    { date: 'not-a-date', opponent: 'Ignored' },
+  ];
+  const post = await req('POST', '/api/season/calendar', { body: { seasonPlanId: plan, matches, replace: true } });
+  check('POST /api/season/calendar -> inserted 2 (undated skipped)', post.status === 200 && post.json?.inserted === 2, post.text.slice(0, 100));
+  const again = await req('POST', '/api/season/calendar', { body: { seasonPlanId: plan, matches, replace: false } });
+  check('calendar re-post without replace -> duplicates skipped', again.json?.inserted === 0, again.text.slice(0, 100));
+  const get = await req('GET', `/api/season/calendar?seasonPlanId=${encodeURIComponent(plan)}`);
+  check('GET /api/season/calendar -> matches sorted', Array.isArray(get.json?.matches) && get.json.matches.length === 2 && get.json.matches[0].date <= get.json.matches[1].date, get.text.slice(0, 100));
+  const next = await req('GET', `/api/season/next-match?from=${today}`);
+  check('next-match -> first imported fixture', next.json?.match?.opponent === 'Verify FC' && next.json.match.homeAway === 'away', next.text.slice(0, 100));
+  const bad = await req('POST', '/api/season/calendar', { body: { seasonPlanId: 'nope', matches: [] } });
+  check('calendar unknown plan -> 404', bad.status === 404, String(bad.status));
+
+  const qiBad = await req('POST', '/api/season/quick-import', { body: { teamCategory: 'u15', matches: [{ opponent: 'x' }] } });
+  check('quick-import without dates -> 400 NO_DATED_MATCHES', qiBad.status === 400 && qiBad.json?.code === 'NO_DATED_MATCHES', qiBad.text.slice(0, 100));
+  const qi = await req('POST', '/api/season/quick-import', { body: { teamCategory: 'u15', matches: [{ date: d(5), opponent: 'Quick FC', homeAway: 'home' }] } });
+  check('quick-import -> plan.id of the category', qi.status === 200 && qi.json?.plan?.id === plan, qi.text.slice(0, 100));
+  const nextQi = await req('GET', `/api/season/next-match?from=${today}`);
+  check('quick-import replaces the calendar', nextQi.json?.match?.opponent === 'Quick FC', nextQi.text.slice(0, 100));
+
+  // Cleanup: an empty calendar brings back the seeded demo match.
+  await req('POST', '/api/season/calendar', { body: { seasonPlanId: plan, matches: [], replace: true } });
+  const restored = await req('GET', `/api/season/next-match?from=${today}`);
+  check('empty calendar -> seeded next match back', isObj(restored.json?.match) && restored.json.match.opponent !== 'Quick FC', restored.text.slice(0, 100));
+}
+
+console.log('\n== Analysis detail / tips ==');
+{
+  const created = await req('POST', '/api/analysis', { body: { teamFormation: '4-3-3', opponentTeamFormation: '3-5-2', opponentTeamName: 'Verify Analysis FC' } });
+  const id = created.json?.id;
+  const before = await req('GET', `/api/analysis/${encodeURIComponent(id)}`);
+  check('GET /api/analysis/:id -> detail with tips []', before.status === 200 && before.json?.opponentTeamName === 'Verify Analysis FC' && Array.isArray(before.json?.tips) && before.json.tips.length === 0 && isStr(before.json?.createdAt), before.text.slice(0, 120));
+  const gen = await req('POST', `/api/analysis/${encodeURIComponent(id)}/generate-tips`);
+  check('POST generate-tips -> 2xx', gen.status >= 200 && gen.status < 300, String(gen.status));
+  const after = await req('GET', `/api/analysis/${encodeURIComponent(id)}`);
+  const tips = after.json?.tips;
+  check('analysis detail -> tips with title/body/category', Array.isArray(tips) && tips.length >= 3 && tips.every((t) => isStr(t.title) && isStr(t.body) && isStr(t.category)), after.text.slice(0, 120));
+  check('tips reflect a back-3 opponent', Array.isArray(tips) && tips.some((t) => t.id === 't_wide'));
+  const missing = await req('GET', '/api/analysis/does-not-exist');
+  check('GET /api/analysis/unknown -> 404', missing.status === 404, String(missing.status));
+  const tipsMissing = await req('POST', '/api/analysis/does-not-exist/generate-tips');
+  check('generate-tips unknown -> 404', tipsMissing.status === 404, String(tipsMissing.status));
+}
+
+console.log('\n== Player import ==');
+{
+  const csv = 'Prénom;Nom;Poste;Numéro;Pied;Date de naissance\nVerify;Importé;Gardien;1;Gauche;12/04/2011\nSans;Poste;?;7;droit;2011-02-30\n';
+  const form = new FormData();
+  form.append('file', new Blob([csv], { type: 'text/csv' }), 'roster.csv');
+  let parse;
+  try {
+    const res = await fetch(BASE + '/api/players/import/parse', { method: 'POST', body: form });
+    parse = { status: res.status, json: await res.json().catch(() => null) };
+  } catch (e) { parse = { status: 0, json: null }; }
+  const rows = parse.json?.rows;
+  check('POST /api/players/import/parse -> rows + existingCount', parse.status === 200 && Array.isArray(rows) && rows.length === 2 && isNum(parse.json?.existingCount), JSON.stringify(parse.json).slice(0, 120));
+  check('parse normalizes position/foot/date', rows?.[0]?.position === 'GK' && rows[0].preferredFoot === 'LEFT' && rows[0].dateOfBirth === '2011-04-12' && rows[0].jerseyNumber === 1 && isStr(rows[0].rowId));
+  check('parse leaves unknown position empty + invalid date null', rows?.[1]?.position === '' && rows[1].dateOfBirth === null);
+
+  const bad = new FormData();
+  bad.append('file', new Blob(['x'], { type: 'application/pdf' }), 'roster.pdf');
+  const pdf = await fetch(BASE + '/api/players/import/parse', { method: 'POST', body: bad }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) })).catch(() => ({ status: 0 }));
+  check('parse pdf -> error code PDF_UNREADABLE', pdf.status >= 400 && pdf.json?.code === 'PDF_UNREADABLE', String(pdf.status));
+
+  const marker = `Verify${Date.now()}`;
+  const imp = await req('POST', '/api/players/import', { body: { players: [
+    { firstName: marker, lastName: 'Importé', position: 'GK', jerseyNumber: 1, preferredFoot: 'LEFT', dateOfBirth: '2011-04-12' },
+    { firstName: marker, lastName: 'Importé', position: 'GK', jerseyNumber: 1, preferredFoot: 'LEFT', dateOfBirth: '2011-04-12' },
+    { firstName: 'Sans', lastName: 'Poste', position: '', jerseyNumber: 7, preferredFoot: 'RIGHT', dateOfBirth: null },
+  ] } });
+  check('POST /api/players/import -> inserted 1, skipped 2', imp.status === 200 && imp.json?.inserted === 1 && imp.json?.skipped === 2 && imp.json?.limitReached === false, imp.text.slice(0, 100));
+  const roster = await req('GET', '/api/players');
+  const added = Array.isArray(roster.json) ? roster.json.find((p) => p.firstName === marker) : null;
+  check('imported player in roster with full shape', added?.position === 'GK' && added.preferredFoot === 'LEFT' && Array.isArray(added.skills) && added.teamContext?.mode === 'coach');
+  if (added) await req('DELETE', `/api/players/${encodeURIComponent(added.id)}`);
+}
+
+console.log('\n== Club library / coach DNA ==');
+{
+  const add = await req('POST', '/api/club/library', { body: { exerciseId: 'ex_001' } });
+  check('POST /api/club/library -> 2xx', add.status === 200, String(add.status));
+  const lib = await req('GET', '/api/club/library');
+  check('club/library lists the added exercise', Array.isArray(lib.json?.exercises) && lib.json.exercises.some((e) => e.id === 'ex_001' && isStr(e.title)));
+  const unknown = await req('POST', '/api/club/library', { body: { exerciseId: 'nope' } });
+  check('club/library unknown exercise -> 404', unknown.status === 404, String(unknown.status));
+  await req('DELETE', '/api/club/library', { body: { exerciseId: 'ex_001' } });
+  const after = await req('GET', '/api/club/library');
+  check('club/library DELETE removes it', Array.isArray(after.json?.exercises) && !after.json.exercises.some((e) => e.id === 'ex_001'));
+
+  const save = await req('POST', '/api/coach-dna/match', { body: { profile: 'pressing', score: 0.8 } });
+  check('POST /api/coach-dna/match -> match echoed', save.status === 200 && save.json?.match?.profile === 'pressing', save.text.slice(0, 100));
+  const read = await req('GET', '/api/coach-dna/match');
+  check('GET /api/coach-dna/match -> saved match', read.json?.match?.score === 0.8, read.text.slice(0, 100));
+  await req('DELETE', '/api/coach-dna/match');
+  const reset = await req('GET', '/api/coach-dna/match');
+  check('coach-dna reset -> match null', reset.status === 200 && reset.json?.match === null, reset.text.slice(0, 100));
+}
+
 console.log(`\n== RESULT: ${pass} passed, ${fail} failed ==`);
 if (failures.length) { console.log('Failures:\n - ' + failures.join('\n - ')); process.exit(1); }
