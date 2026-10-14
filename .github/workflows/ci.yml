@@ -16,3 +16,24 @@ jobs:
       - run: npm ci
 
       - run: npm run build
+
+      - name: Start production server
+        run: |
+          nohup npm run start -- -p 4900 > /tmp/server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4900/api/subscription/info > /dev/null; then
+              echo "server ready after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "server did not become ready in time"
+          cat /tmp/server.log
+          exit 1
+
+      - name: Run API verification suite (31 assertions)
+        run: node scripts/verify-api.mjs http://localhost:4900
+
+      - name: Server log (on failure)
+        if: failure()
+        run: cat /tmp/server.log || true

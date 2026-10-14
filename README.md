@@ -61,7 +61,8 @@ Dependency-free (`node:crypto` scrypt, opaque tokens) — see `lib/auth.ts`.
 ### Verification
 
 `node ../scripts/verify-api.mjs` runs 31 assertions against a running server
-(core contract + full auth flow). The GitHub Actions CI builds the project on
+(core contract + full auth flow). The GitHub Actions CI builds the project and
+runs the same suite (`scripts/verify-api.mjs`) against the production server on
 every push.
 
 ## Next steps
