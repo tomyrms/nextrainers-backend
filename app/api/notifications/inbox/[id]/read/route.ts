@@ -1,0 +1,10 @@
+import { json } from "@/lib/http";
+import { store } from "@/lib/store";
+
+// PATCH /api/notifications/inbox/:id/read (no body) -> response unused (2xx).
+export async function PATCH(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  const notification = store.notifications.find((n) => n.id === id);
+  if (notification && notification.readAt === null) notification.readAt = new Date().toISOString();
+  return json({ ok: true });
+}
