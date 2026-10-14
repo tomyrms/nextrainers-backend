@@ -209,6 +209,25 @@ console.log('\n== Players / analysis / notifications / club ==');
   check('POST /api/analytics/track -> 204', r4.status === 204, String(r4.status));
 }
 
+console.log('\n== Generation ==');
+{
+  // The client only treats the generate call as successful when the response
+  // carries a `sessions` key (contract §11); it waits up to 300s for it.
+  const r = await req('POST', '/api/season/generate', { body: { seasonPlanId: planId ?? 'plan_1', locale: 'fr' } });
+  check('POST /api/season/generate -> 200 + sessions array', r.status === 200 && isObj(r.json) && 'sessions' in r.json && Array.isArray(r.json.sessions), r.text.slice(0, 100));
+  check('generate.sessions has >= 1 entry', Array.isArray(r.json?.sessions) && r.json.sessions.length >= 1);
+}
+{
+  // After generate resolves the job is done and carries the navigation path.
+  const r = await req('GET', '/api/generation/status');
+  check('GET /api/generation/status -> 200 status=done', r.status === 200 && r.json?.status === 'done', r.text.slice(0, 100));
+  check('generation/status.path is string', isStr(r.json?.path));
+}
+{
+  const r = await req('POST', '/api/generation/live-activity-token', { body: { token: 'test-token' } });
+  check('POST /api/generation/live-activity-token -> 2xx', r.status >= 200 && r.status < 300, String(r.status));
+}
+
 console.log('\n== Auth (session) ==');
 {
   const email = `verify_${Date.now()}@test.dev`;

@@ -41,6 +41,7 @@ The response shape is byte-compatible with what the shipped client expects
 | `GET/POST /api/trainings`, `GET/DELETE /api/trainings/:id` | in-memory list |
 | `GET /api/exercises`, `GET/POST/DELETE /api/exercises/favorite` | in-memory |
 | `GET/POST /api/season-plan`, `GET /api/season/sessions`, `/calendar`, `/next-match` | empty states |
+| `POST /api/season/generate`, `GET /api/generation/status`, `POST /api/generation/live-activity-token` | simulated generation job (~1.2s): appends 2 sessions + trainings, status polls read `done` + `path` (see `lib/generation.ts`) |
 | `GET /api/club/info` | no club yet |
 | `GET /api/analysis`, `GET/POST /api/players`, `GET /api/lineup`, `GET /api/assistant/context` | empty states |
 | `POST /api/auth-google-mobile` | accepts idToken, returns dummy ticket |
