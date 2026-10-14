@@ -1,18 +1,18 @@
 import { connection } from "next/server";
 import { json, readJson } from "@/lib/http";
-import { store } from "@/lib/store";
+import { store, withStore } from "@/lib/store";
 import type { Analysis } from "@/lib/seed";
 
 // GET /api/analysis -> TOP-LEVEL array (contract §7). The card reads `id`,
 // `teamFormation`, `opponentTeamName`, `opponentTeamFormation`.
-export async function GET() {
+async function handleGET() {
   await connection();
   return json(store.analyses);
 }
 
 // POST /api/analysis body { teamFormation, opponentTeamFormation, opponentTeamName }
 // -> { id } (contract §7).
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const body = await readJson<Partial<Analysis>>(req);
   const analysis: Analysis = {
     id: `an_${Date.now()}`,
@@ -23,3 +23,6 @@ export async function POST(req: Request) {
   store.analyses.unshift(analysis);
   return json({ id: analysis.id });
 }
+
+export const GET = withStore(handleGET);
+export const POST = withStore(handlePOST);

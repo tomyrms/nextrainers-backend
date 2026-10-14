@@ -42,3 +42,5 @@ next-env.d.ts
 
 # local persisted store (written at runtime, see README)
 /data/
+
+.vercel

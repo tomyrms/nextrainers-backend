@@ -1,17 +1,17 @@
 import { connection } from "next/server";
 import { json, readJson } from "@/lib/http";
-import { store } from "@/lib/store";
+import { store, withStore } from "@/lib/store";
 import type { Training } from "@/lib/seed";
 
 // GET /api/trainings -> TOP-LEVEL array of sessions (contract §3).
 // The list is mutable (delete/duplicate), so always render per request.
-export async function GET() {
+async function handleGET() {
   await connection();
   return json(store.trainings);
 }
 
 // DELETE /api/trainings?id=<id> (query param, not path!) -> response unused.
-export async function DELETE(req: Request) {
+async function handleDELETE(req: Request) {
   const id = new URL(req.url).searchParams.get("id");
   if (id) store.trainings = store.trainings.filter((training) => training.id !== id);
   return json({ ok: true });
@@ -19,7 +19,7 @@ export async function DELETE(req: Request) {
 
 // POST /api/trainings (create) is not exercised by the captured client; kept
 // as a small demo helper with contract-shaped defaults.
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const body = await readJson<Partial<Training>>(req);
   const training: Training = {
     id: `sess_${Date.now()}`,
@@ -37,3 +37,7 @@ export async function POST(req: Request) {
   store.trainings.unshift(training);
   return json(training);
 }
+
+export const GET = withStore(handleGET);
+export const DELETE = withStore(handleDELETE);
+export const POST = withStore(handlePOST);

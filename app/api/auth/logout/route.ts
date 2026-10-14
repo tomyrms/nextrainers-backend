@@ -5,7 +5,7 @@ import { json } from "@/lib/http";
 // POST -> drops the session (from header or cookie) and clears the cookie.
 export async function POST(req: Request) {
   const token = getSessionToken(req);
-  if (token) destroySession(token);
+  if (token) await destroySession(token);
 
   const store = await cookies();
   store.delete(SESSION_COOKIE);

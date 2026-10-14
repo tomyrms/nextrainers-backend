@@ -1,11 +1,14 @@
 import { json } from "@/lib/http";
-import { store } from "@/lib/store";
+import { store, withStore } from "@/lib/store";
 
-export function GET() {
+function handleGET() {
   return json(store.onboarding);
 }
 
-export function POST() {
+function handlePOST() {
   store.onboarding.completed = true;
   return json(store.onboarding);
 }
+
+export const GET = withStore(handleGET);
+export const POST = withStore(handlePOST);

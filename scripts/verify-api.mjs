@@ -224,6 +224,25 @@ console.log('\n== Generation ==');
   check('generation/status.path is string', isStr(r.json?.path));
 }
 {
+  // Regenerating replaces the previous run (no stacking) with the same dates.
+  const body = { seasonPlanId: planId ?? 'plan_1', locale: 'fr' };
+  const a = await req('POST', '/api/season/generate', { body });
+  const b = await req('POST', '/api/season/generate', { body });
+  const sa = Array.isArray(a.json?.sessions) ? a.json.sessions : [];
+  const sb = Array.isArray(b.json?.sessions) ? b.json.sessions : [];
+  const generated = (list) => list.filter((s) => String(s.trainingSessionId ?? '').startsWith('tr_gen_'));
+  check('regenerate -> session count stable', sa.length > 0 && sa.length === sb.length, `${sa.length} -> ${sb.length}`);
+  check('regenerate -> exactly 2 generated sessions', generated(sb).length === 2, String(generated(sb).length));
+  check('regenerate -> 3 seeded + 2 generated = 5 sessions', sb.length === 5, String(sb.length));
+  check('regenerate -> dates stable', JSON.stringify(sa.map((s) => s.date)) === JSON.stringify(sb.map((s) => s.date)));
+  const seasonId = planId ?? 'plan_1';
+  const list = await req('GET', `/api/season/sessions?seasonPlanId=${encodeURIComponent(seasonId)}`);
+  const listed = Array.isArray(list.json?.sessions) ? list.json.sessions : Array.isArray(list.json) ? list.json : null;
+  check('season/sessions count matches generate', listed !== null && listed.length === sb.length, `${listed?.length} vs ${sb.length}`);
+  const st = await req('GET', '/api/generation/status');
+  check('generation/status still done after regenerate', st.status === 200 && st.json?.status === 'done', st.text.slice(0, 100));
+}
+{
   const r = await req('POST', '/api/generation/live-activity-token', { body: { token: 'test-token' } });
   check('POST /api/generation/live-activity-token -> 2xx', r.status >= 200 && r.status < 300, String(r.status));
 }
@@ -261,6 +280,18 @@ console.log('\n== Auth (session) ==');
     const meAfter = await req('GET', '/api/auth/me', { headers: { authorization: `Bearer ${token}` } });
     check('session destroyed after logout', meAfter.json?.user === null, meAfter.text.slice(0, 120));
   }
+
+  // Sessions are independent: logging one out leaves another one valid.
+  const l1 = await req('POST', '/api/auth/login', { body: { email, password } });
+  const l2 = await req('POST', '/api/auth/login', { body: { email: email.toUpperCase(), password } });
+  const t1 = l1.json?.token, t2 = l2.json?.token;
+  check('two logins -> two distinct tokens (email case-insensitive)', isStr(t1) && isStr(t2) && t1 !== t2);
+  await req('POST', '/api/auth/logout', { headers: { authorization: `Bearer ${t1}` } });
+  const still = await req('GET', '/api/auth/me', { headers: { authorization: `Bearer ${t2}` } });
+  check('other session survives logout', still.json?.user?.email === email, still.text.slice(0, 120));
+  const gone = await req('GET', '/api/auth/me', { headers: { authorization: `Bearer ${t1}` } });
+  check('logged-out token -> user:null', gone.status === 200 && gone.json?.user === null, gone.text.slice(0, 120));
+  await req('POST', '/api/auth/logout', { headers: { authorization: `Bearer ${t2}` } });
 }
 
 console.log('\n== Collateral ==');

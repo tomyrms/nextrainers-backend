@@ -31,7 +31,7 @@ jobs:
           cat /tmp/server.log
           exit 1
 
-      - name: Run API verification suite (31 assertions)
+      - name: Run API verification suite
         run: node scripts/verify-api.mjs http://localhost:4900
 
       - name: Server log (on failure)

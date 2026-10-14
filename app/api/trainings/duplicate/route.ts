@@ -1,8 +1,8 @@
 import { json, readJson } from "@/lib/http";
-import { store } from "@/lib/store";
+import { store, withStore } from "@/lib/store";
 
 // POST /api/trainings/duplicate body { shareToken } -> { trainingId } (contract §3).
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const body = await readJson<{ shareToken?: string }>(req);
   const trainingId = body?.shareToken ? store.shareTokens.get(body.shareToken) : undefined;
   const source = trainingId ? store.trainings.find((t) => t.id === trainingId) : undefined;
@@ -18,3 +18,5 @@ export async function POST(req: Request) {
   store.trainings.unshift(copy);
   return json({ trainingId: copy.id });
 }
+
+export const POST = withStore(handlePOST);

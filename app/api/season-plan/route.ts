@@ -1,11 +1,11 @@
 import { connection } from "next/server";
 import { json, readJson } from "@/lib/http";
-import { store } from "@/lib/store";
+import { store, withStore } from "@/lib/store";
 import type { SeasonPlan } from "@/lib/seed";
 
 // GET /api/season-plan -> { plan, categories, prefill } (contract §5).
 // The plan is mutable (PUT below), so always render per request.
-export async function GET() {
+async function handleGET() {
   await connection();
   const plan = store.seasonPlans[0] ?? null;
   return json({
@@ -17,10 +17,13 @@ export async function GET() {
 
 // PUT /api/season-plan (create or update; there is NO POST) body = plan object
 // -> { plan } with an assigned id (contract §5).
-export async function PUT(req: Request) {
+async function handlePUT(req: Request) {
   const body = await readJson<Partial<SeasonPlan>>(req);
   if (!body) return json({ error: "invalid_body" }, { status: 400 });
   const plan = { ...body, id: body.id ?? store.seasonPlans[0]?.id ?? "plan_1" } as SeasonPlan;
   store.seasonPlans = [plan];
   return json({ plan });
 }
+
+export const GET = withStore(handleGET);
+export const PUT = withStore(handlePUT);

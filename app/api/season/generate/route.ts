@@ -1,5 +1,5 @@
 import { json, readJson } from "@/lib/http";
-import { store } from "@/lib/store";
+import { store, withStore } from "@/lib/store";
 import { startGeneration, type GenerationLocale } from "@/lib/generation";
 
 type GenerateBody = { seasonPlanId?: string; locale?: string };
@@ -9,7 +9,7 @@ const LOCALES: GenerationLocale[] = ["fr", "en", "de"];
 // POST /api/season/generate body { seasonPlanId, locale } -> { sessions }
 // (contract §11). The client requires the `sessions` key in the response and
 // awaits up to 300s: the clone starts the simulated job and waits for it.
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   const body = await readJson<GenerateBody>(req);
   const seasonPlanId = body?.seasonPlanId;
 
@@ -27,3 +27,5 @@ export async function POST(req: Request) {
   // Full session list for the plan after generation (contract §6 shape).
   return json({ sessions: store.seasonSessions });
 }
+
+export const POST = withStore(handlePOST);

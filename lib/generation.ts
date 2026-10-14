@@ -1,8 +1,14 @@
-// In-memory generation job manager for POST /api/season/generate (contract §11).
+// Generation job manager for POST /api/season/generate (contract §11).
 // The real backend generates a season skeleton asynchronously; the clone
 // simulates that: starting a job flips its status to "running", the work lands
 // ~1.2s later, and the client polls /api/generation/status until it reads
 // "done" (then navigates to `path`).
+//
+// Runs are deterministic: a regeneration replaces the previous run's sessions
+// and trainings (recognised by their tr_gen_ training ids, so it works across
+// instances and restarts) and recomputes the same dates. The job record lives
+// in the persisted store so any instance can answer the status poll; it
+// expires JOB_TTL_MS after it finished.
 import { store } from "./store";
 import type { Exercise, SeasonPlan, SeasonSession, Training } from "./seed";
 
@@ -10,18 +16,24 @@ export type GenerationLocale = "fr" | "en" | "de";
 
 export type GenerationStatus = "running" | "done" | "failed";
 
-export type GenerationJob = {
+// Persisted part of a job (store.generationJob).
+export type GenerationJobRecord = {
   seasonPlanId: string;
   locale: GenerationLocale;
   status: GenerationStatus;
   // Where the client should navigate once the job is done (client reads it).
   path?: string;
   startedAt: string;
-  // Sessions produced by this run, kept so a regeneration can replace them.
-  generated: SeasonSession[];
+  finishedAt?: string;
+};
+
+export type GenerationJob = GenerationJobRecord & {
   // Resolves when the simulated work finishes (success or failure).
   done: Promise<void>;
 };
+
+// A finished job stops being reported after this long (status -> 404).
+export const JOB_TTL_MS = 10 * 60 * 1000;
 
 // Simulated generation time. The client polls every 4s, so one tick is enough.
 const GENERATION_MS = 1200;
@@ -84,12 +96,18 @@ function trainingWeekdays(days: string[]): number[] {
   return numbers.length ? numbers : [2, 4];
 }
 
-// The next `count` training dates, strictly after the latest planned session
-// (and never in the past), matching the plan's training days.
+function isGenerated(session: SeasonSession): boolean {
+  return session.trainingSessionId?.startsWith(GENERATED_TRAINING_PREFIX) ?? false;
+}
+
+// The next `count` training dates, strictly after the latest non-generated
+// session (and never in the past), matching the plan's training days. Ignoring
+// generated sessions keeps the dates stable across regenerations.
 function nextTrainingDates(plan: SeasonPlan, count: number): string[] {
   const weekdays = trainingWeekdays(plan.trainingDays);
   const today = ymd(new Date());
-  const latest = [today, ...store.seasonSessions.map((s) => s.date)].sort().pop() ?? today;
+  const kept = store.seasonSessions.filter((s) => !isGenerated(s)).map((s) => s.date);
+  const latest = [today, ...kept].sort().pop() ?? today;
   const cursor = parseYmd(latest);
 
   const dates: string[] = [];
@@ -117,24 +135,25 @@ function mesocycleFor(weekIndex: number, plan: SeasonPlan): string {
 
 // ---------------------------------------------------------------- job state
 
-const jobs = new Map<string, GenerationJob>(); // keyed by seasonPlanId
-let current: GenerationJob | null = null; // last job started (single-user clone)
+// The last job started (single-user clone), or null once it has expired.
+export function getCurrentJob(now = Date.now()): GenerationJobRecord | null {
+  const job = store.generationJob;
+  if (!job) return null;
+  if (job.status === "running") {
+    // A run older than the TTL was lost (instance died mid-run).
+    return now - Date.parse(job.startedAt) > JOB_TTL_MS ? null : job;
+  }
+  const finished = Date.parse(job.finishedAt ?? job.startedAt);
+  return now - finished > JOB_TTL_MS ? null : job;
+}
 
 // Live-activity tokens pushed by the client (contract §11). The clone only
 // stores them; a real generator would use them to report progress.
-const liveActivityTokens = new Set<string>();
-
-export function getCurrentJob(): GenerationJob | null {
-  return current;
-}
-
 export function storeLiveActivityToken(token: string): void {
-  liveActivityTokens.add(token);
-  // Keep the demo set bounded (oldest out first).
-  if (liveActivityTokens.size > 20) {
-    const oldest = liveActivityTokens.values().next().value;
-    if (oldest !== undefined) liveActivityTokens.delete(oldest);
-  }
+  const tokens = store.liveActivityTokens.filter((existing) => existing !== token);
+  tokens.push(token);
+  // Keep the demo list bounded (oldest out first).
+  store.liveActivityTokens = tokens.slice(-20);
 }
 
 // ---------------------------------------------------------------- generation
@@ -162,7 +181,7 @@ function buildTraining(blueprint: SessionBlueprint, date: string, plan: SeasonPl
 }
 
 // The simulated work: session skeleton + matching trainings into the store.
-function runGeneration(job: GenerationJob): void {
+function runGeneration(job: GenerationJobRecord): void {
   const plan = store.seasonPlans.find((p) => p.id === job.seasonPlanId);
   if (!plan) throw new Error(`unknown season plan: ${job.seasonPlanId}`);
 
@@ -195,46 +214,33 @@ function runGeneration(job: GenerationJob): void {
     };
   });
 
-  job.generated = sessions;
-  store.seasonSessions = [...store.seasonSessions, ...sessions];
+  store.seasonSessions = [...store.seasonSessions.filter((s) => !isGenerated(s)), ...sessions];
 }
 
 // Starts (or restarts) the job for a season plan and returns it immediately;
 // callers await `job.done` when they want the finished result.
 export function startGeneration(seasonPlanId: string, locale: GenerationLocale): GenerationJob {
-  const previous = jobs.get(seasonPlanId);
-
-  let finish!: () => void;
-  const job: GenerationJob = {
+  const record: GenerationJobRecord = {
     seasonPlanId,
     locale,
     status: "running",
     startedAt: new Date().toISOString(),
-    generated: [],
-    done: new Promise<void>((resolve) => {
-      finish = resolve;
-    }),
   };
-  jobs.set(seasonPlanId, job);
-  current = job;
+  store.generationJob = record;
 
-  // Regeneration: drop the sessions the previous run for this plan appended.
-  if (previous?.generated.length) {
-    const stale = new Set(previous.generated);
-    store.seasonSessions = store.seasonSessions.filter((session) => !stale.has(session));
-  }
+  const done = new Promise<void>((resolve) => {
+    setTimeout(() => {
+      let result: Pick<GenerationJobRecord, "status" | "path">;
+      try {
+        runGeneration(record);
+        result = { status: "done", path: "/fr/saison" };
+      } catch {
+        result = { status: "failed" };
+      }
+      store.generationJob = { ...record, ...result, finishedAt: new Date().toISOString() };
+      resolve();
+    }, GENERATION_MS);
+  });
 
-  setTimeout(() => {
-    try {
-      runGeneration(job);
-      job.status = "done";
-      job.path = "/fr/saison";
-    } catch {
-      job.status = "failed";
-    } finally {
-      finish();
-    }
-  }, GENERATION_MS);
-
-  return job;
+  return { ...record, done };
 }

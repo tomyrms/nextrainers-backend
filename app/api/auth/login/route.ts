@@ -11,10 +11,10 @@ export async function POST(req: Request) {
     return json({ error: "email and password are required" }, { status: 400 });
   }
 
-  const result = loginUser(body.email, body.password);
+  const result = await loginUser(body.email, body.password);
   if (!result.ok) return json({ error: result.error }, { status: 401 });
 
-  const session = createSession(result.user.id);
+  const session = await createSession(result.user.id);
   if (!session.ok) return json({ error: session.error }, { status: 500 });
 
   const store = await cookies();

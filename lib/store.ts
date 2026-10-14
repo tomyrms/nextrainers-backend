@@ -2,17 +2,18 @@
 // All collections start from the seeds in lib/seed.ts and can be mutated by
 // the route handlers (favorites, deletes, read receipts, ...).
 //
-// Persistence (lib/persist.ts): on module init the seed state is overlaid with
-// data/store.json when it exists (a fresh checkout or CI run starts with no
-// file and uses the seeds as is), and every mutation schedules a debounced,
-// asynchronous save. Mutations are detected by wrapping the store in a
+// Persistence (lib/persist.ts, lib/kv.ts): route handlers wrapped in
+// withStore() overlay the seed state with the latest saved snapshot (Upstash
+// Redis in production, data/kv.json locally; a fresh store uses the seeds as
+// is) and save it back before responding when they mutated it. Mutations are detected by wrapping the store in a
 // tracking proxy — top-level assignments (including lib/generation.ts's),
 // array mutations (push/unshift/splice/...), Set/Map mutations and property
 // writes on the store's own objects all call persistSoon(). Wrappers are
 // memoized per target, so values keep a stable identity across reads. Routes
 // that mutate objects pulled out of a list (e.g. one notification) call
 // persistSoon() explicitly since those are raw references.
-import { loadSnapshot, persistSoon, registerSnapshot } from "./persist";
+import type { GenerationJobRecord } from "./generation";
+import { persistSoon, registerApplier, registerSnapshot } from "./persist";
 import {
   seedAnalyses,
   seedExercises,
@@ -24,7 +25,7 @@ import {
   seedTrainings,
 } from "./seed";
 
-export { persistSoon } from "./persist";
+export { persistSoon, withStore } from "./persist";
 
 // ---------------------------------------------------------------- state
 
@@ -68,6 +69,8 @@ const state = {
   exerciseFeedback: {} as Record<string, boolean>,
   // Live-activity tokens pushed by the client (contract §11), bounded to 20.
   liveActivityTokens: [] as string[],
+  // Last season-generation job (lib/generation.ts), shared across instances.
+  generationJob: null as GenerationJobRecord | null,
 };
 
 export type StoreState = typeof state;
@@ -113,6 +116,10 @@ function applySnapshot(snap: Record<string, unknown>): void {
     const value = snap[key];
     if (value !== null && typeof value === "object" && !Array.isArray(value)) raw[key] = value;
   }
+  const job = snap.generationJob as GenerationJobRecord | null | undefined;
+  if (job === null || (typeof job === "object" && typeof job?.status === "string")) {
+    state.generationJob = job ?? null;
+  }
   if (Array.isArray(snap.favorites)) {
     state.favorites = new Set(snap.favorites.filter((id): id is string => typeof id === "string"));
   }
@@ -126,8 +133,7 @@ function applySnapshot(snap: Record<string, unknown>): void {
   }
 }
 
-const persisted = loadSnapshot();
-if (persisted) applySnapshot(persisted);
+registerApplier(applySnapshot);
 
 // Serializes the whole state. Set/Map are expanded to arrays because JSON has
 // no such types.
@@ -154,6 +160,7 @@ function snapshot(): Record<string, unknown> {
     shareTokens: [...state.shareTokens],
     exerciseFeedback: state.exerciseFeedback,
     liveActivityTokens: state.liveActivityTokens,
+    generationJob: state.generationJob,
   };
 }
 

@@ -10,7 +10,7 @@ export async function POST(req: Request) {
     return json({ error: "email and password are required" }, { status: 400 });
   }
 
-  const result = registerUser(body.email, body.password);
+  const result = await registerUser(body.email, body.password);
   if (!result.ok) {
     return json({ error: result.error }, { status: result.code === "duplicate" ? 409 : 400 });
   }

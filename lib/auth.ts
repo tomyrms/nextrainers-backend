@@ -1,7 +1,10 @@
-// Lightweight in-memory session auth. Dependency-free (node:crypto only):
-// passwords are scrypt-hashed with a random per-user salt, sessions are
-// opaque random tokens. Swap for a real database when you grow the clone.
+// Lightweight session auth. Dependency-free (node:crypto only): passwords are
+// scrypt-hashed with a random per-user salt, sessions are opaque random tokens.
+// Users and sessions live in lib/kv.ts (Upstash Redis in production, a local
+// file in dev/CI) and are read through on every call, so a login or logout on
+// one serverless instance is seen by all of them.
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { kvDel, kvGet, kvSet, kvSetIfAbsent } from "./kv";
 
 export type AuthUser = { id: string; email: string };
 
@@ -12,8 +15,21 @@ type Session = { userId: string; createdAt: string };
 // Name of the cookie that carries the session token.
 export const SESSION_COOKIE = "session";
 
-const users = new Map<string, UserRecord>(); // keyed by normalized email
-const sessions = new Map<string, Session>(); // keyed by token
+// Key layout: user record by normalized email, email by user id, session by token.
+const userKey = (email: string) => `auth:user:${email}`;
+const userIdKey = (id: string) => `auth:uid:${id}`;
+const sessionKey = (token: string) => `auth:session:${token}`;
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+async function readJsonKey<T>(key: string): Promise<T | null> {
+  const text = await kvGet(key);
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -36,16 +52,15 @@ function publicUser(user: UserRecord): AuthUser {
 }
 
 // Validates email + password and stores the user. Fails on duplicates.
-export function registerUser(
+export async function registerUser(
   email: string,
   password: string,
-): { ok: true; user: AuthUser } | { ok: false; error: string; code: "invalid" | "duplicate" } {
+): Promise<{ ok: true; user: AuthUser } | { ok: false; error: string; code: "invalid" | "duplicate" }> {
   const normalized = email.trim().toLowerCase();
   if (!EMAIL_RE.test(normalized)) return { ok: false, code: "invalid", error: "invalid email" };
   if (password.length < MIN_PASSWORD_LENGTH) {
     return { ok: false, code: "invalid", error: `password must be at least ${MIN_PASSWORD_LENGTH} characters` };
   }
-  if (users.has(normalized)) return { ok: false, code: "duplicate", error: "email already registered" };
 
   const salt = randomBytes(16).toString("hex");
   const user: UserRecord = {
@@ -55,38 +70,45 @@ export function registerUser(
     salt,
     createdAt: new Date().toISOString(),
   };
-  users.set(normalized, user);
+  // NX makes concurrent registrations of one email race-free.
+  if (!(await kvSetIfAbsent(userKey(normalized), JSON.stringify(user)))) {
+    return { ok: false, code: "duplicate", error: "email already registered" };
+  }
+  await kvSet(userIdKey(user.id), normalized);
   return { ok: true, user: publicUser(user) };
 }
 
 // Checks credentials. Same error for unknown email and wrong password.
-export function loginUser(
+export async function loginUser(
   email: string,
   password: string,
-): { ok: true; user: AuthUser } | { ok: false; error: string } {
-  const user = users.get(email.trim().toLowerCase());
+): Promise<{ ok: true; user: AuthUser } | { ok: false; error: string }> {
+  const user = await readJsonKey<UserRecord>(userKey(email.trim().toLowerCase()));
   if (!user || !verifyPassword(password, user)) return { ok: false, error: "invalid credentials" };
   return { ok: true, user: publicUser(user) };
 }
 
 // Creates a session and returns its opaque token.
-export function createSession(userId: string): { ok: true; token: string } | { ok: false; error: string } {
-  if (!getUserById(userId)) return { ok: false, error: "unknown user" };
+export async function createSession(
+  userId: string,
+): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+  if (!(await getUserById(userId))) return { ok: false, error: "unknown user" };
   const token = randomBytes(32).toString("hex");
-  sessions.set(token, { userId, createdAt: new Date().toISOString() });
+  const session: Session = { userId, createdAt: new Date().toISOString() };
+  await kvSet(sessionKey(token), JSON.stringify(session), SESSION_TTL_SECONDS);
   return { ok: true, token };
 }
 
 // Removes the session so the token stops authenticating.
-export function destroySession(token: string): void {
-  sessions.delete(token);
+export async function destroySession(token: string): Promise<void> {
+  await kvDel(sessionKey(token));
 }
 
-export function getUserById(id: string): AuthUser | null {
-  for (const user of users.values()) {
-    if (user.id === id) return publicUser(user);
-  }
-  return null;
+export async function getUserById(id: string): Promise<AuthUser | null> {
+  const email = await kvGet(userIdKey(id));
+  if (!email) return null;
+  const user = await readJsonKey<UserRecord>(userKey(email));
+  return user ? publicUser(user) : null;
 }
 
 // Token from the Authorization header first, then the session cookie.
@@ -107,10 +129,10 @@ export function getSessionToken(req: Request): string | null {
 }
 
 // Resolves the request's session to its user, or null when not authenticated.
-export function getUserFromRequest(req: Request): AuthUser | null {
+export async function getUserFromRequest(req: Request): Promise<AuthUser | null> {
   const token = getSessionToken(req);
   if (!token) return null;
-  const session = sessions.get(token);
+  const session = await readJsonKey<Session>(sessionKey(token));
   if (!session) return null;
   return getUserById(session.userId);
 }

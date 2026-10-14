@@ -1,17 +1,17 @@
 import { connection } from "next/server";
 import { json, readJson } from "@/lib/http";
-import { store } from "@/lib/store";
+import { store, withStore } from "@/lib/store";
 
 // GET /api/user/profile -> full profile object (contract §8).
 // The profile is mutable (PUT below), so always render per request.
-export async function GET() {
+async function handleGET() {
   await connection();
   return json(store.profile);
 }
 
 // PUT /api/user/profile — partial update of the fields the client sends;
 // response body is not read by the client (any 2xx).
-export async function PUT(req: Request) {
+async function handlePUT(req: Request) {
   const body = await readJson<Record<string, unknown>>(req);
   const allowed = ["fullName", "dateOfBirth", "teamName", "experience", "level"] as const;
   for (const key of allowed) {
@@ -19,3 +19,6 @@ export async function PUT(req: Request) {
   }
   return json(store.profile);
 }
+
+export const GET = withStore(handleGET);
+export const PUT = withStore(handlePUT);
