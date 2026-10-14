@@ -14,6 +14,8 @@ npm run dev -- -p 4900
 The mirror frontend proxies `/api/*` to this server automatically when it is
 running (see `scripts/serve-preview.mjs` in the reconstruction workspace).
 
+State is persisted to `data/store.json` at runtime (gitignored, reloaded on startup — delete it to reset to the seeds).
+
 ## Premium
 
 `lib/subscription.ts` is the clone's source of truth for the paywall:

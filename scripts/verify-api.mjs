@@ -263,5 +263,55 @@ console.log('\n== Auth (session) ==');
   }
 }
 
+console.log('\n== Collateral ==');
+{
+  const r = await req('GET', '/api/club/logo');
+  check('GET /api/club/logo -> 200 + logoUrl null', r.status === 200 && r.json?.logoUrl === null, r.text.slice(0, 100));
+  check('club/logo.canManageLogo === false', r.json?.canManageLogo === false);
+}
+{
+  const r = await req('GET', '/api/team/logo');
+  check('GET /api/team/logo -> 200 + logoUrl null', r.status === 200 && r.json?.logoUrl === null, r.text.slice(0, 100));
+}
+{
+  const r = await req('GET', '/api/coach-dna/match');
+  check('GET /api/coach-dna/match -> match key present (null)', r.status === 200 && r.json !== null && 'match' in r.json && r.json.match === null, r.text.slice(0, 100));
+}
+{
+  const r = await req('GET', '/api/club/library');
+  check('GET /api/club/library -> exercises array', r.status === 200 && Array.isArray(r.json?.exercises), r.text.slice(0, 100));
+  check('club/library userContext + hasClubAccess flags', r.json?.userContext?.canManageLibrary === false && r.json?.hasClubAccess === false);
+}
+{
+  // Exercise-feedback roundtrip: POST true -> GET true -> DELETE -> GET false.
+  const exerciseId = 'ex_001';
+  const post = await req('POST', '/api/exercise-feedback', { body: { exerciseId, isPositive: true } });
+  check('POST /api/exercise-feedback -> 2xx', post.status >= 200 && post.status < 300, String(post.status));
+  const on = await req('GET', `/api/exercise-feedback?exerciseId=${encodeURIComponent(exerciseId)}`);
+  check('feedback isPositive true after POST', on.status === 200 && on.json?.isPositive === true, on.text.slice(0, 100));
+  const del = await req('DELETE', `/api/exercise-feedback?exerciseId=${encodeURIComponent(exerciseId)}`);
+  check('DELETE /api/exercise-feedback -> 2xx', del.status >= 200 && del.status < 300, String(del.status));
+  const off = await req('GET', `/api/exercise-feedback?exerciseId=${encodeURIComponent(exerciseId)}`);
+  check('feedback isPositive false after DELETE', off.status === 200 && off.json?.isPositive === false, off.text.slice(0, 100));
+}
+{
+  // Player PATCH coachNotes roundtrip on the first seeded player (restored after).
+  const list = await req('GET', '/api/players');
+  const player = Array.isArray(list.json) ? list.json[0] : null;
+  if (player) {
+    const original = player.coachNotes ?? '';
+    const marker = `verify ${Date.now()}`;
+    const patch = await req('PATCH', `/api/players/${encodeURIComponent(player.id)}`, { body: { coachNotes: marker } });
+    check('PATCH /api/players/:id coachNotes applied', patch.status === 200 && patch.json?.coachNotes === marker, patch.text.slice(0, 100));
+    const after = await req('GET', '/api/players');
+    const updated = Array.isArray(after.json) ? after.json.find((p) => p.id === player.id) : null;
+    check('GET /api/players reflects coachNotes', updated?.coachNotes === marker);
+    const restore = await req('PATCH', `/api/players/${encodeURIComponent(player.id)}`, { body: { coachNotes: original } });
+    check('coachNotes restored to original', restore.status === 200 && restore.json?.coachNotes === original, restore.text.slice(0, 100));
+  } else {
+    for (const name of ['PATCH /api/players/:id coachNotes applied', 'GET /api/players reflects coachNotes', 'coachNotes restored to original']) check(name, false, 'no players');
+  }
+}
+
 console.log(`\n== RESULT: ${pass} passed, ${fail} failed ==`);
 if (failures.length) { console.log('Failures:\n - ' + failures.join('\n - ')); process.exit(1); }

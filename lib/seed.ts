@@ -73,6 +73,8 @@ export type Analysis = {
   teamFormation: string;
   opponentTeamName: string;
   opponentTeamFormation: string;
+  // Filled lazily by GET /api/analysis/:id when missing (contract §7).
+  createdAt?: string;
 };
 
 export type SeasonPlan = {
