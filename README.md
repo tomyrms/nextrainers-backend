@@ -14,8 +14,12 @@ npm run dev -- -p 4900
 The mirror frontend proxies `/api/*` to this server automatically when it is
 running (see `scripts/serve-preview.mjs` in the reconstruction workspace).
 
+**Per-account data.** Every account has its own store (seeded from `lib/seed.ts` on first use): roster, trainings, favorites, season, analyses, notifications, profile. Requests without a valid session (`Authorization: Bearer <token>` or the `session` cookie) use the shared **demo** data, like the original guest mode. Route handlers are wrapped in `withStore()` (`lib/persist.ts`), which resolves the account and scopes `store` to it (AsyncLocalStorage). Shared trainings are public: `POST /api/trainings/share` writes a copy under `share:<token>` (90-day TTL) that anyone can open.
+
+The exercise library has the 60 exercises of `content/exercises.json`: 19 hand-curated in `lib/seed.ts`, 41 generated into `lib/exercise-library.ts` by `node scripts/import-exercises.mjs` (block type and rules derived from theme/age/duration and the description).
+
 State (store + auth users/sessions) goes through `lib/kv.ts`:
-- **Production (Vercel):** Upstash Redis (`upstash-kv-fulvous-tree`, fra1, linked to this project) via the Marketplace integration (`KV_REST_API_URL` / `KV_REST_API_TOKEN`, or `UPSTASH_REDIS_REST_*`). Every instance reads the latest store revision per request and writes before responding, so logins, logouts, favorites and generation status are shared across serverless instances.
+- **Production (Vercel):** Upstash Redis (`upstash-kv-fulvous-tree`, fra1, linked to this project) via the Marketplace integration (`KV_REST_API_URL` / `KV_REST_API_TOKEN`, or `UPSTASH_REDIS_REST_*`). Keys: `store:snapshot`/`store:rev` (demo), `store:u:<id>:snapshot`/`:rev` (accounts), `auth:*`, `share:*`. Every instance reads the latest revision of the request's store and writes before responding, so logins, logouts, favorites and generation status are shared across serverless instances.
 - **Local dev / CI (no token):** `data/kv.json` (gitignored, survives restarts — delete it to reset to the seeds). Falls back to memory when the filesystem is read-only.
 
 ## Premium

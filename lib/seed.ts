@@ -1,6 +1,7 @@
 // Demo seed data for the in-memory store. Shapes follow docs/api-contract.md
 // (recovered from the original client bundles). Content strings are French;
 // the source material lives in content/*.json at the repository root.
+import { LIBRARY_EXERCISE_SOURCES } from "./exercise-library";
 
 // ---------------------------------------------------------------- types
 
@@ -206,7 +207,7 @@ function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-type ExerciseSource = {
+export type ExerciseSource = {
   id: string;
   title: string;
   type: ExerciseType;
@@ -517,7 +518,11 @@ const EXERCISE_SOURCES: ExerciseSource[] = [
   },
 ];
 
-export const seedExercises: Exercise[] = EXERCISE_SOURCES.map(buildExercise);
+// Hand-curated sources first (their diagram variants stay stable), then the
+// generated library (lib/exercise-library.ts); listed in id order.
+export const seedExercises: Exercise[] = [...EXERCISE_SOURCES, ...LIBRARY_EXERCISE_SOURCES]
+  .map(buildExercise)
+  .sort((a, b) => a.id.localeCompare(b.id));
 
 // ---------------------------------------------------------------- trainings
 

@@ -452,5 +452,61 @@ console.log('\n== Club library / coach DNA ==');
   check('coach-dna reset -> match null', reset.status === 200 && reset.json?.match === null, reset.text.slice(0, 100));
 }
 
+console.log('\n== Tenancy (per-account data) ==');
+{
+  const lib = await req('GET', '/api/exercises');
+  check('exercise library has the 60 content exercises', Array.isArray(lib.json) && lib.json.length >= 60 && ['ex_002', 'ex_060'].every((id) => lib.json.some((e) => e.id === id)), String(lib.json?.length));
+
+  const stamp = Date.now();
+  const accounts = [];
+  for (const who of ['a', 'b']) {
+    const email = `tenant_${who}_${stamp}@test.dev`;
+    await req('POST', '/api/auth/register', { body: { email, password: 'password123' } });
+    const login = await req('POST', '/api/auth/login', { body: { email, password: 'password123' } });
+    accounts.push({ email, headers: { authorization: `Bearer ${login.json?.token}` } });
+  }
+  const [A, B] = accounts;
+  check('two accounts logged in', accounts.every((acc) => acc.headers.authorization.length > 20));
+
+  const profA = await req('GET', '/api/user/profile', { headers: A.headers });
+  const profB = await req('GET', '/api/user/profile', { headers: B.headers });
+  check('each account gets its own profile (email)', profA.json?.email === A.email && profB.json?.email === B.email, `${profA.json?.email} / ${profB.json?.email}`);
+
+  const rosterA = await req('GET', '/api/players', { headers: A.headers });
+  check('new account starts from the seeded roster', Array.isArray(rosterA.json) && rosterA.json.length === 14, String(rosterA.json?.length));
+
+  const marker = `Tenant${stamp}`;
+  await req('POST', '/api/players', { headers: A.headers, body: { firstName: marker, lastName: 'A', position: 'BU' } });
+  const seenBy = async (headers) => {
+    const r = await req('GET', '/api/players', headers ? { headers } : {});
+    return Array.isArray(r.json) && r.json.some((p) => p.firstName === marker);
+  };
+  check('player created by A is in A roster', await seenBy(A.headers));
+  check('player created by A is NOT in B roster', !(await seenBy(B.headers)));
+  check('player created by A is NOT in the demo roster', !(await seenBy(null)));
+
+  await req('POST', '/api/exercises/favorite', { headers: A.headers, body: { exerciseId: 'ex_060' } });
+  const favs = async (headers) => {
+    const r = await req('GET', '/api/exercises/favorite', headers ? { headers } : {});
+    return Array.isArray(r.json) ? r.json.map((e) => e.id) : null;
+  };
+  check('favorite of A visible to A', (await favs(A.headers))?.includes('ex_060'));
+  check('favorite of A invisible to B and demo', !(await favs(B.headers))?.includes('ex_060') && !(await favs(null))?.includes('ex_060'));
+
+  // Shares are public: B's training opens for an anonymous visitor.
+  const trainingsB = await req('GET', '/api/trainings', { headers: B.headers });
+  const trainingId = Array.isArray(trainingsB.json) ? trainingsB.json[0]?.id : null;
+  const share = await req('POST', '/api/trainings/share', { headers: B.headers, body: { trainingId } });
+  const token = String(share.json?.shareUrl ?? '').split('/').pop();
+  const open = await req('GET', `/api/trainings/share/${encodeURIComponent(token)}`);
+  check('share created by B opens anonymously', open.status === 200 && open.json?.training?.id === trainingId && isObj(open.json?.sharedBy), open.text.slice(0, 100));
+  const unknown = await req('POST', '/api/trainings/share', { headers: B.headers, body: { trainingId: 'nope' } });
+  check('share of unknown training -> 404', unknown.status === 404, String(unknown.status));
+
+  for (const acc of accounts) await req('POST', '/api/auth/logout', { headers: acc.headers });
+  const after = await req('GET', '/api/players', { headers: A.headers });
+  check('logged-out token falls back to the demo data', Array.isArray(after.json) && !after.json.some((p) => p.firstName === marker));
+}
+
 console.log(`\n== RESULT: ${pass} passed, ${fail} failed ==`);
 if (failures.length) { console.log('Failures:\n - ' + failures.join('\n - ')); process.exit(1); }
