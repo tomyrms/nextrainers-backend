@@ -15,7 +15,7 @@ The mirror frontend proxies `/api/*` to this server automatically when it is
 running (see `scripts/serve-preview.mjs` in the reconstruction workspace).
 
 State (store + auth users/sessions) goes through `lib/kv.ts`:
-- **Production (Vercel):** Upstash Redis via the Marketplace integration (`KV_REST_API_URL` / `KV_REST_API_TOKEN`, or `UPSTASH_REDIS_REST_*`). Every instance reads the latest store revision per request and writes before responding, so logins, logouts, favorites and generation status are shared across serverless instances.
+- **Production (Vercel):** Upstash Redis (`upstash-kv-fulvous-tree`, fra1, linked to this project) via the Marketplace integration (`KV_REST_API_URL` / `KV_REST_API_TOKEN`, or `UPSTASH_REDIS_REST_*`). Every instance reads the latest store revision per request and writes before responding, so logins, logouts, favorites and generation status are shared across serverless instances.
 - **Local dev / CI (no token):** `data/kv.json` (gitignored, survives restarts — delete it to reset to the seeds). Falls back to memory when the filesystem is read-only.
 
 ## Premium
