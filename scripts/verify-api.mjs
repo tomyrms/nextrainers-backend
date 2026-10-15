@@ -393,6 +393,9 @@ console.log('\n== Analysis detail / tips ==');
   check('GET /api/analysis/unknown -> 404', missing.status === 404, String(missing.status));
   const tipsMissing = await req('POST', '/api/analysis/does-not-exist/generate-tips');
   check('generate-tips unknown -> 404', tipsMissing.status === 404, String(tipsMissing.status));
+  const del = await req('DELETE', `/api/analysis/${encodeURIComponent(id)}`);
+  const gone = await req('GET', `/api/analysis/${encodeURIComponent(id)}`);
+  check('DELETE /api/analysis/:id -> removed', del.status === 200 && gone.status === 404, `${del.status}/${gone.status}`);
 }
 
 console.log('\n== Player import ==');
